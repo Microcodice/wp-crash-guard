@@ -1,119 +1,461 @@
-# WP Crash Guard Detailed User Manual
 
-WP Crash Guard is a "must-use" WordPress plugin designed to prevent website crashes caused by faulty plugins or themes. It proactively intercepts critical errors and automatically deactivates the problematic component, ensuring instant site recovery for you and your visitors.
+# WP Crash Guard Complete User Manual
+
+Version 1.4.0
+
+## Table of Contents
+
+1.  [Introduction]
+2.  [Key Features
+3.  [Installation]
+4.  [Configuration]
+5.  [Whitelist Management]
+6.  [Monitoring & Logs]
+7.  [Advanced Settings]
+8.  [Use Cases & Best Practices]
+9.  [Troubleshooting]
+10.  [Technical Details]
+
+## Introduction
+
+WP Crash Guard is a WordPress security and stability plugin that acts as a protective shield for your website. Operating as a "must-use" plugin, it intercepts critical errors before they can crash your site and automatically takes corrective action by deactivating the problematic plugin or theme.
+
+### Why WP Crash Guard?
+
+-   **Zero Downtime**: Your site remains accessible even when a plugin fails
+-   **Automatic Recovery**: No manual intervention required
+-   **Smart Detection**: Identifies the exact plugin causing issues
+-   **Flexible Response**: Customizable behavior for different scenarios
+-   **Complete Transparency**: Detailed logging of all actions
 
 ## Key Features
 
--   **Proactive Protection**: Intercepts fatal errors (`E_ERROR`, `E_PARSE`, `E_COMPILE_ERROR`) before they can crash your entire site.
-    
--   **Intelligent Recovery Mode**: Deactivates the culprit plugin or theme without manual intervention, allowing your site to stay online.
-    
--   **Customizable User Experience**: Configure the plugin's behavior for visitors (e.g., maintenance page, redirect) and for administrators (e.g., toast notification, detailed error page).
-    
--   **Comprehensive Logging**: Logs every intercepted error and action taken for easy diagnostics.
-    
--   **Dry Run Mode**: Allows you to test the plugin without actually deactivating components, which is useful for debugging in development environments.
-    
--   **Multilingual Support**: Ready for translation into any language.
-    
+### Core Protection Features
 
-## 🚀 Installation
+-   **Fatal Error Interception**: Catches PHP fatal errors, parse errors, and compile errors
+-   **Memory Management**: Handles out-of-memory errors with emergency recovery
+-   **Exception Handling**: Manages uncaught exceptions that would normally crash the site
+-   **Intelligent Plugin Identification**: Pinpoints the exact plugin causing the error
 
-Installing WP Crash Guard is an automated process. You don't need to do anything complex, as the installer file handles everything for you.
+### User Experience Features
 
-### Installation Steps
+-   **Customizable Visitor Experience**: 5 different modes for handling errors on the frontend
+-   **Admin Notification Options**: 4 different ways to notify administrators
+-   **Whitelist System**: Exclude trusted plugins from monitoring
+-   **Multi-language Support**: Full internationalization support
 
-1.  Download the latest version of the plugin from GitHub.
-    
-2.  Log in to your WordPress dashboard.
-    
-3.  Go to **Plugins > Add New > Upload Plugin**.
-    
-4.  Select the downloaded `.zip` file and click **Install Now**.
-    
-5.  Once the installation is complete, click **Activate Plugin**.
-    
+### Developer Features
 
-**Please Note**: The plugin will automatically install itself as a "must-use" (`mu-plugin`). After activation, the installer file will self-delete, and you will be redirected to the plugin's settings page. You will no longer see the plugin in your regular plugin list, but it will be listed under **Plugins > Must-Use**.
+-   **Dry Run Mode**: Test without actually deactivating plugins
+-   **Configurable Error Levels**: Choose which PHP errors trigger protection
+-   **Comprehensive Logging**: Detailed error and action logs
+-   **Must-Use Architecture**: Loads before all other plugins for maximum protection
 
-## 🛠️ Detailed Configuration
+## Installation
 
-After installation, you can customize WP Crash Guard's behavior from its settings page.
+### Automatic Installation
+
+1.  Download the latest WP Crash Guard installer package
+2.  Log into your WordPress admin panel
+3.  Navigate to **Plugins → Add New → Upload Plugin**
+4.  Select the downloaded ZIP file and click **Install Now**
+5.  Click **Activate Plugin** when prompted
+
+### What Happens During Installation
+
+1.  The installer creates the `mu-plugins` directory if it doesn't exist
+2.  Copies all plugin files to `mu-plugins/wp-crash-guard/`
+3.  Creates a loader file `wp-crash-guard-loader.php` in `mu-plugins`
+4.  Deactivates and removes itself automatically
+5.  Redirects you to the plugin list
+
+### Post-Installation
+
+After installation, WP Crash Guard will:
+
+-   No longer appear in your regular plugins list
+-   Be visible under **Plugins → Must-Use**
+-   Show a new menu item **Crash Guard** in your admin panel
+
+## Configuration
 
 ### Accessing Settings
 
-1.  Log in to your WordPress dashboard.
-    
-2.  Navigate to **Crash Guard > Settings** in the left-hand menu.
-    
+Navigate to **Crash Guard → Settings** in your WordPress admin panel.
 
-### Detailed Explanation of Options
+### Visitor Behavior Settings
 
-#### Behavior for Visitors
+Configure how your site responds to errors for regular visitors:
 
-This option defines what visitors to your site will see if a critical error occurs. The goal is to minimize the impact on traffic and user experience.
+#### Do Nothing (Silent Mode)
 
--   **Do nothing**: The error is handled in the background. The problematic plugin is deactivated, and the page is reloaded silently. This is useful if you want the site to recover on its own without visitors noticing what happened.
-    
--   **Automatically reload the page**: After handling the error, the site displays a simple "updating" screen and reloads automatically after a short delay. This alerts the user that something has happened but guides them to a successful recovery.
-    
--   **Show maintenance page**: This replaces the error page with a professional maintenance page. This is the best choice for a production site, as it reassures visitors that the issue is temporary and is being addressed.
-    
--   **Show custom message**: Similar to the maintenance page, but it allows you to insert a custom HTML message. This is ideal for displaying specific alerts or including contact information.
-    
--   **Stealth mode**: The error is handled and the page reloads instantly. This is the most aggressive mode for recovery, showing no intermediate message to the user.
-    
+-   **What happens**: Plugin is deactivated silently, page reloads automatically
+-   **User sees**: Nothing - the page simply refreshes
+-   **Best for**: Sites where user experience is paramount
+-   **Note**: Most transparent option
 
-#### Behavior for Admins
+#### Automatically Reload
 
-This option controls how you are notified in case of an error, allowing you to choose the level of detail needed for debugging.
+-   **What happens**: Shows a loading screen, then reloads after delay
+-   **User sees**: "Updating..." message with countdown
+-   **Best for**: Sites where brief interruptions are acceptable
+-   **Customizable**: Set delay from 0-60 seconds
 
--   **Show full error details**: A blocking page (the white error screen) with all the technical details of the error (file, line, message). This is the most useful mode for developers but blocks site access until it is resolved.
-    
--   **Show toast notification**: A small, unintrusive notification appears in the top right, informing you that a plugin has been deactivated. This allows you to continue working without interruptions but provides an immediate alert.
-    
--   **Automatically reload**: The page reloads, and an alert informs you that a recovery has occurred. This is a good compromise between an immediate alert and a non-blocking experience.
-    
--   **Show nothing**: The plugin acts completely silently. The only way to know that an error has been handled is to check the plugin's log page in the dashboard.
-    
+#### Show Maintenance Page
 
-#### Error Interception Threshold
+-   **What happens**: Displays professional maintenance page
+-   **User sees**: "Maintenance in progress" message
+-   **Best for**: Professional sites, e-commerce
+-   **HTTP Status**: Returns 503 Service Unavailable
 
-This option allows you to calibrate the sensitivity of WP Crash Guard, defining which error level should trigger a deactivation.
+#### Show Custom Message
 
--   **Fatal Errors (E_ERROR)**: The plugin only intervenes for critical errors that would cause the site to crash. This is the safest and most recommended mode, as it will never deactivate a plugin for minor issues.
-    
--   **Warnings & Above (E_WARNING)**: The plugin also intervenes for serious warnings. This is useful in development or staging environments to identify and resolve issues before they become fatal in production.
-    
--   **Notices & Above (E_NOTICE)**: The plugin intervenes for almost all PHP issues, including non-critical notices. Use this option with caution, as it could lead to unintended deactivations for minor problems that do not affect the site's functionality.
-    
+-   **What happens**: Displays your custom HTML content
+-   **User sees**: Your personalized message
+-   **Best for**: Branded experiences, specific instructions
+-   **Supports**: Full HTML including styles
 
-## 🔍 Diagnostics & Logging
+#### Stealth Mode
 
-WP Crash Guard logs every action and error to help you with troubleshooting.
+-   **What happens**: Instant redirect with no intermediate page
+-   **User sees**: Page flickers and reloads
+-   **Best for**: Maximum speed recovery
+-   **Note**: May be jarring for users
 
-### Viewing Recent Errors
+### Administrator Behavior Settings
 
-1.  Go to **Crash Guard > WP Crash Guard** in your dashboard.
-    
-2.  The first tab, **Recent Errors**, displays a list of intercepted errors, including details on the plugin, the type of error, the date, and the user involved.
-    
+Configure notifications for logged-in administrators:
 
-### Viewing the Action Log
+#### Show Full Error Details
 
-1.  On the same page, click the **Action Log** tab.
-    
-2.  Here you will find a list of all plugin actions, such as plugin activation or automatic deactivation, along with the date and user.
-    
+-   **What shows**: Complete error page with technical details
+-   **Information**: Error message, file path, line number
+-   **Best for**: Development environments
+-   **Note**: Blocks page until acknowledged
 
-### Clearing Logs
+#### Show Toast Notification
 
-On both tabs, you will find a **Clear** button to empty the logs and keep your database clean.
+-   **What shows**: Small popup in top-right corner
+-   **Duration**: 5 seconds (extendable on hover)
+-   **Best for**: Production sites with active admins
+-   **Non-blocking**: Can continue working
 
-## 💡 Common Troubleshooting
+#### Automatically Reload
 
--   **White page after installation**: If your site displays a white page after activation, don't worry. The installer has completed its process and the plugin is already active. Simply reload the page and navigate to your dashboard.
-    
--   **WP Crash Guard is not in the plugin list**: This is the correct behavior. As a `mu-plugin`, it loads before all other plugins. To see it, go to **Plugins > Must-Use**.
-    
--   **A plugin was unexpectedly deactivated**: Check the **Recent Errors** section to find the cause. The plugin will show you the exact file and line of code that generated the problem.
+-   **What happens**: Page refreshes with dashboard notice
+-   **Best for**: Admins who want minimal interruption
+-   **Combines**: Auto-recovery with notification
+
+#### Show Nothing
+
+-   **What happens**: Complete silence, check logs later
+-   **Best for**: Production sites with monitoring
+-   **Note**: Only dashboard notices appear
+
+## Whitelist Management
+
+### Accessing the Whitelist
+
+Navigate to **Crash Guard** and click the **Whitelist** tab.
+
+### Understanding the Whitelist
+
+The whitelist allows you to exclude specific plugins from WP Crash Guard monitoring. Whitelisted plugins:
+
+-   Will never be deactivated by WP Crash Guard
+-   Continue to be loaded even if they cause errors
+-   Are your responsibility to monitor
+
+### When to Use Whitelist
+
+Add plugins to the whitelist when:
+
+-   **Development/Debug plugins**: Query Monitor, Debug Bar
+-   **Testing plugins**: Intentionally cause errors
+-   **Critical plugins**: Must run despite occasional warnings
+-   **Special behavior plugins**: Custom error handlers
+
+### Managing Whitelisted Plugins
+
+1.  **Search Function**: Type to filter plugins instantly
+2.  **Status Indicators**: Shows active/inactive state
+3.  **Bulk Selection**: Check multiple plugins at once
+4.  **Save Changes**: Click "Save Whitelist" to apply
+
+### Best Practices
+
+-   Only whitelist plugins you trust completely
+-   Regularly review your whitelist
+-   Remove plugins from whitelist when no longer needed
+-   Document why each plugin is whitelisted
+
+## Monitoring & Logs
+
+### Recent Errors Tab
+
+View all intercepted errors with detailed information:
+
+#### Information Displayed
+
+-   **Plugin Name**: Which plugin caused the error
+-   **Error Message**: The PHP error description
+-   **File Location**: Exact file and line number
+-   **Timestamp**: When the error occurred
+-   **User**: Who was logged in when it happened
+
+#### Special Indicators
+
+-   **Memory Errors**: Shows warning about PHP memory limit
+-   **Repeated Errors**: Groups similar errors together
+
+### Action Log Tab
+
+Track all WP Crash Guard actions:
+
+#### Logged Actions
+
+-   **Plugin Activations**: When plugins are activated
+-   **Automatic Deactivations**: When WP Crash Guard intervenes
+-   **Manual Actions**: Admin-initiated changes
+
+#### Log Management
+
+-   **Clear Logs**: Remove old entries
+-   **Export**: Copy data for external analysis
+-   **Retention**: Last 100 actions kept automatically
+
+## Advanced Settings
+
+### Error Interception Threshold
+
+Choose which PHP errors trigger protection:
+
+#### Fatal Errors Only (Default)
+
+-   **Catches**: E_ERROR, E_PARSE, E_COMPILE_ERROR
+-   **Ignores**: Warnings, notices, deprecations
+-   **Best for**: Production sites
+-   **Safety**: Highest - only critical errors
+
+#### Warnings & Above
+
+-   **Catches**: All above + E_WARNING
+-   **Use case**: Staging environments
+-   **Risk**: May deactivate for non-critical issues
+
+#### Notices & Above
+
+-   **Catches**: Almost all PHP errors
+-   **Use case**: Development only
+-   **Warning**: High risk of false positives
+
+### Operation Modes
+
+#### Dry Run Mode
+
+-   **Function**: Detect and log without deactivating
+-   **Use for**: Testing WP Crash Guard behavior
+-   **Shows**: What would happen without doing it
+-   **Safe for**: Production testing
+
+#### Auto-Deactivation Toggle
+
+-   **Enabled**: Problematic plugins are deactivated
+-   **Disabled**: Only logging, no action taken
+-   **Warning**: Disabling may leave site broken
+
+#### Error Logging
+
+-   **Enabled**: All errors saved to database
+-   **Disabled**: No error history kept
+-   **Performance**: Minimal impact when enabled
+
+### Reload Delay
+
+-   **Range**: 0-60 seconds
+-   **Default**: 5 seconds
+-   **0 seconds**: Instant reload
+-   **Higher values**: Give users time to read messages
+
+### Custom Messages
+
+Create personalized error pages:
+
+```html
+<div style="text-align: center; padding: 50px;">
+  <h1>We'll be right back!</h1>
+  <p>Our team is updating the site. Please try again in a moment.</p>
+  <p>Questions? Email: support@example.com</p>
+</div>
+
+```
+
+## Use Cases & Best Practices
+
+### Development Environment
+
+**Recommended Settings**:
+
+-   Admin Mode: Show full error details
+-   Visitor Mode: Do nothing
+-   Error Level: Notices & Above
+-   Dry Run: Enabled initially
+-   Whitelist: Development tools
+
+### Staging Environment
+
+**Recommended Settings**:
+
+-   Admin Mode: Toast notification
+-   Visitor Mode: Maintenance page
+-   Error Level: Warnings & Above
+-   Dry Run: Disabled
+-   Reload Delay: 3 seconds
+
+### Production Environment
+
+**Recommended Settings**:
+
+-   Admin Mode: Show nothing
+-   Visitor Mode: Do nothing (stealth)
+-   Error Level: Fatal Errors only
+-   Dry Run: Disabled
+-   Whitelist: Minimal
+
+### E-Commerce Sites
+
+**Special Considerations**:
+
+-   Use "Do nothing" for visitors (no cart interruption)
+-   Enable comprehensive logging
+-   Set up external monitoring
+-   Custom message with support contact
+
+### Membership Sites
+
+**Recommended approach**:
+
+-   Maintenance page with login link
+-   Toast notifications for admins
+-   Whitelist membership plugins carefully
+-   Quick reload delays (2-3 seconds)
+
+## Troubleshooting
+
+### Common Issues
+
+#### Plugin Not Visible After Installation
+
+-   **Check**: Must-Use plugins page
+-   **Location**: `/wp-content/mu-plugins/`
+-   **Solution**: Installation successful, working as intended
+
+#### Errors Still Showing
+
+-   **Check**: Error threshold settings
+-   **Check**: Plugin not in whitelist
+-   **Check**: Dry run mode not enabled
+-   **Solution**: Verify error type matches threshold
+
+#### Plugin Deactivated Unexpectedly
+
+-   **Check**: Recent Errors log
+-   **Check**: Error threshold too low
+-   **Solution**: Adjust threshold or whitelist plugin
+
+#### Memory Errors Recurring
+
+-   **Issue**: PHP memory limit too low
+-   **Solution**: Increase `memory_limit` in php.ini
+-   **Temporary**: WP Crash Guard increases to 256MB on error
+
+### Advanced Troubleshooting
+
+#### Debug Mode
+
+Add to `wp-config.pdf`:
+
+```php
+define('WP_DEBUG', true);
+define('WP_DEBUG_LOG', true);
+define('WP_DEBUG_DISPLAY', false);
+
+```
+
+#### Check Must-Use Loading
+
+1.  FTP to `/wp-content/mu-plugins/`
+2.  Verify `wp-crash-guard-loader.php` exists
+3.  Check `wp-crash-guard/` directory present
+
+#### Manual Deactivation
+
+If needed, delete via FTP:
+
+-   `/wp-content/mu-plugins/wp-crash-guard-loader.php`
+-   `/wp-content/mu-plugins/wp-crash-guard/`
+
+## Technical Details
+
+### Architecture
+
+WP Crash Guard uses WordPress's must-use plugin system:
+
+-   Loads before all regular plugins
+-   Cannot be deactivated from admin
+-   Survives plugin conflicts
+
+### Error Handling Flow
+
+1.  **Error Occurs**: PHP generates fatal error
+2.  **Interception**: Shutdown handler catches error
+3.  **Identification**: Traces error to specific plugin
+4.  **Whitelist Check**: Skips if plugin is whitelisted
+5.  **Logging**: Records error details
+6.  **Action**: Sets transient for deactivation
+7.  **Recovery**: Redirects based on settings
+8.  **Cleanup**: Deactivates plugin on next load
+
+### Performance Considerations
+
+-   **Memory Usage**: ~1MB baseline
+-   **CPU Impact**: Negligible except during errors
+-   **Database Queries**: 2-3 per error event
+-   **Page Load**: No measurable impact
+
+### Security Features
+
+-   **Nonce Verification**: All admin actions protected
+-   **Capability Checks**: Requires `manage_options`
+-   **Data Sanitization**: All inputs filtered
+-   **SQL Injection Protection**: Prepared statements
+
+### Compatibility
+
+-   **WordPress**: 5.0+ required
+-   **PHP**: 7.2+ recommended
+-   **MySQL**: 5.6+ required
+-   **Multisite**: Fully supported
+
+### File ZIP Structure
+
+```
+/wp-crash-guard.zip/
+├── wp-crash-guard-installer.php
+└── plugin-files/
+    ├── wp-crash-guard.php
+    ├── readme.md
+    ├── readme-italian.md
+    └── languages/
+	    ├── wp-crash-guard.pot
+        ├── wp-crash-guard-it_IT.mo
+        └── wp-crash-guard-it_IT.po
+
+```
+
+----------
+
+**Version**: 1.4.0  
+**Author**: Microcodice  
+**License**: GPL v2 or later  
+**Support**: [GitHub Issues](https://github.com/microcodice/wp-crash-guard)
