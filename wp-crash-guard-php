@@ -1,0 +1,1461 @@
+<?php
+/**
+ * Plugin Name: WP Crash Guard
+ * Description: Automatically prevents WordPress crashes by detecting and disabling problematic plugins.
+ * Version: 1.3.0
+ * Author: Microcodice
+ * Author URI: https://microcodice.it
+ * Plugin URI: https://github.com/microcodice/wp-crash-guard
+ * License: GPL v2 or later
+ * License URI: https://www.gnu.org/licenses/gpl-2.0.html
+ * Text Domain: wp-crash-guard
+ * Domain Path: /languages
+ */
+
+// Exit if accessed directly
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+// Define plugin constants
+define('WPCG_PLUGIN_FILE', __FILE__);
+define('WPCG_PLUGIN_DIR', plugin_dir_path(__FILE__));
+define('WPCG_PLUGIN_URL', plugin_dir_url(__FILE__));
+define('WPCG_PLUGIN_BASENAME', plugin_basename(__FILE__));
+
+/**
+ * Main WP Crash Guard Class
+ */
+class WP_Crash_Guard {
+    
+    private static $instance = null;
+    private $emergency_memory = null;
+    
+    /**
+     * Get the singleton instance
+     */
+    public static function get_instance() {
+        if (null === self::$instance) {
+            self::$instance = new self();
+        }
+        return self::$instance;
+    }
+    
+    /**
+     * Constructor
+     */
+    private function __construct() {
+        $this->init();
+    }
+    
+    /**
+     * Initialize the plugin
+     */
+    private function init() {
+        // Load text domain for translations
+        add_action('plugins_loaded', [$this, 'load_textdomain']);
+        
+        // Increase memory limit for WP Crash Guard itself
+        $current_limit = ini_get('memory_limit');
+        if ($this->convert_to_bytes($current_limit) < $this->convert_to_bytes('128M')) {
+            @ini_set('memory_limit', '128M');
+        }
+        
+        // Reserve emergency memory
+        $this->reserve_memory();
+        
+        // Register error handlers
+        register_shutdown_function([$this, 'handle_shutdown']);
+        set_error_handler([$this, 'handle_error']);
+        set_exception_handler([$this, 'handle_exception']);
+        
+        // Basic hooks
+        add_action('plugins_loaded', [$this, 'check_recovery_mode'], 1);
+        add_action('activated_plugin', [$this, 'on_plugin_activated'], 10, 2);
+        
+        // Admin hooks
+        add_action('admin_menu', [$this, 'add_admin_menu']);
+        add_action('admin_notices', [$this, 'show_admin_notices']);
+        add_action('admin_footer', [$this, 'show_toast_notifications']);
+        add_action('wp_footer', [$this, 'show_toast_notifications']);
+        
+        // Admin POST actions
+        add_action('admin_init', [$this, 'handle_admin_actions']);
+    }
+    
+    /**
+     * Load plugin text domain
+     */
+    public function load_textdomain() {
+        load_plugin_textdomain('wp-crash-guard', false, WPCG_PLUGIN_DIR . '/languages/');
+    }
+
+    /**
+     * Convert memory values to bytes
+     */
+    private function convert_to_bytes($value) {
+        $value = trim($value);
+        $last = strtolower($value[strlen($value)-1]);
+        $value = (int)$value;
+        
+        switch($last) {
+            case 'g':
+                $value *= 1024;
+            case 'm':
+                $value *= 1024;
+            case 'k':
+                $value *= 1024;
+        }
+        
+        return $value;
+    }
+    
+    /**
+     * Reserve emergency memory
+     */
+    private function reserve_memory() {
+        $this->emergency_memory = str_repeat('x', 10240);
+    }
+    
+    /**
+     * Handle fatal errors during shutdown
+     */
+    public function handle_shutdown() {
+        $error = error_get_last();
+        
+        if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR])) {
+            if (strpos($error['message'], 'Allowed memory size') !== false) {
+                $this->emergency_memory = null;
+                @ini_set('memory_limit', '256M');
+            }
+            
+            $culprit = $this->identify_problematic_plugin($error);
+            $settings = $this->get_settings();
+            
+            if ($culprit && $culprit !== WPCG_PLUGIN_BASENAME) {
+                if ($settings['enable_logging']) {
+                    $this->log_error($culprit, $error);
+                }
+                
+                if ($settings['disable_plugin'] && !$settings['dry_run']) {
+                    if (strpos($error['message'], 'Allowed memory size') !== false) {
+                        global $wpdb;
+                        $option_name = '_transient_wpcg_disable_plugin';
+                        $option_value = $culprit;
+                        
+                        $wpdb->query(
+                            $wpdb->prepare(
+                                "INSERT INTO {$wpdb->options} (option_name, option_value, autoload) 
+                                 VALUES (%s, %s, 'no') 
+                                 ON DUPLICATE KEY UPDATE option_value = %s",
+                                $option_name,
+                                $option_value,
+                                $option_value
+                            )
+                        );
+                    } else {
+                        set_transient('wpcg_disable_plugin', $culprit, 300);
+                    }
+                }
+                
+                $is_admin = $this->is_admin_context();
+                $mode = $is_admin ? $settings['admin_mode'] : $settings['visitor_mode'];
+                
+                $redirect_url = '';
+                if ($is_admin) {
+                    $redirect_url = admin_url('admin.php?page=wp-crash-guard&wpcg_recovery=1');
+                } else {
+                    $redirect_url = $_SERVER['REQUEST_URI'] . (strpos($_SERVER['REQUEST_URI'], '?') !== false ? '&' : '?') . 'wpcg_recovery=1';
+                }
+
+                // Attempt PHP redirect first
+                if (!headers_sent()) {
+                    if (ob_get_level() > 0) {
+                        ob_end_clean();
+                    }
+                    if (($is_admin && in_array($mode, ['nothing', 'reload', 'simple'])) || (!$is_admin && in_array($mode, ['nothing', 'reload', 'stealth'])) || strpos($error['message'], 'Allowed memory size') !== false) {
+                        header('Location: ' . $redirect_url);
+                        exit;
+                    }
+                }
+                
+                // Fallback to JavaScript redirect if headers are already sent
+                if (($is_admin && in_array($mode, ['nothing', 'reload', 'simple'])) || (!$is_admin && in_array($mode, ['nothing', 'reload', 'stealth'])) || strpos($error['message'], 'Allowed memory size') !== false) {
+                    $this->show_js_redirect_page($redirect_url);
+                    exit;
+                }
+                
+                // Default handling if redirect isn't an option or mode is different
+                if ($is_admin) {
+                    $this->show_shutdown_page_for_admin($culprit, $error, $settings['admin_mode']);
+                } else {
+                    $this->show_shutdown_page_for_visitor($culprit, $error, $settings['visitor_mode'], $settings);
+                }
+                
+                exit;
+            }
+        }
+    }
+    
+    /**
+     * Show JavaScript redirect page
+     */
+    private function show_js_redirect_page($url) {
+        $html = '<!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>' . __('Restoring Site...', 'wp-crash-guard') . '</title>
+            <style>
+                body { font-family: Arial, sans-serif; background: #f1f1f1; margin: 0; padding: 20px; text-align: center; }
+                .container { max-width: 600px; margin: 100px auto; padding: 20px; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h2>' . __('Restoring your site...', 'wp-crash-guard') . '</h2>
+                <p>' . __('Please wait, the site is being restored after a critical error.', 'wp-crash-guard') . '</p>
+            </div>
+            <script>
+                setTimeout(function() {
+                    window.location.href = "' . esc_url($url) . '";
+                }, 500);
+            </script>
+        </body>
+        </html>';
+        echo $html;
+        exit;
+    }
+    
+    /**
+     * Show shutdown page for admin
+     */
+    private function show_shutdown_page_for_admin($plugin, $error, $mode) {
+        if (strpos($error['message'], 'Allowed memory size') !== false) {
+            $this->show_js_redirect_page(admin_url('admin.php?page=wp-crash-guard&wpcg_recovery=1'));
+            exit;
+        }
+        
+        switch ($mode) {
+            case 'nothing':
+                $this->show_js_redirect_page(admin_url());
+                exit;
+            case 'reload':
+                $this->show_js_redirect_page(admin_url('admin.php?page=wp-crash-guard&wpcg_recovery=1'));
+                exit;
+            case 'simple':
+                $plugin_name = $this->get_plugin_name($plugin);
+                $toast = [
+                    'plugin' => $plugin,
+                    'message' => __('Plugin deactivated after critical error: ', 'wp-crash-guard') . $plugin_name,
+                    'type' => 'warning',
+                    'timestamp' => time()
+                ];
+                $toasts = get_transient('wpcg_toast_notifications') ?: [];
+                $toasts[] = $toast;
+                set_transient('wpcg_toast_notifications', $toasts, 60);
+                $this->show_js_redirect_page(admin_url('admin.php?page=wp-crash-guard&wpcg_recovery=1'));
+                exit;
+            case 'detailed':
+            default:
+                $plugin_name = $this->get_plugin_name($plugin);
+                $error_message = __('Error: ', 'wp-crash-guard') . esc_html($error['message']);
+                $error_details = '<code>' . sprintf(__('File: %s on line %s', 'wp-crash-guard'), esc_html($error['file']), esc_html($error['line'])) . '</code>';
+                
+                echo '<!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>' . __('Error Intercepted - WP Crash Guard', 'wp-crash-guard') . '</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; background: #f1f1f1; margin: 0; padding: 20px; }
+                        .container { max-width: 600px; margin: 50px auto; background: white; padding: 30px; border-radius: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+                        h1 { color: #d63638; }
+                        .button { display: inline-block; padding: 10px 20px; background: #2271b1; color: white; text-decoration: none; border-radius: 3px; margin-right: 10px; }
+                        .button:hover { background: #135e96; }
+                        code { background: #f0f0f0; padding: 2px 5px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <h1>' . __('Error Intercepted!', 'wp-crash-guard') . '</h1>
+                        <p><strong>' . __('WP Crash Guard', 'wp-crash-guard') . '</strong> ' . __('has detected a critical error caused by the plugin:', 'wp-crash-guard') . '</p>
+                        <p><code>' . esc_html($plugin_name) . '</code></p>
+                        <p>' . $error_message . '</p>
+                        <p>' . __('The plugin will be automatically deactivated on the next page load.', 'wp-crash-guard') . '</p>
+                        <p>
+                            <a href="' . esc_url($_SERVER['REQUEST_URI'] . (strpos($_SERVER['REQUEST_URI'], '?') !== false ? '&' : '?') . 'wpcg_recovery=1') . '" class="button">' . __('Reload the page', 'wp-crash-guard') . '</a>
+                            <a href="' . esc_url(admin_url()) . '" class="button">' . __('Go to Dashboard', 'wp-crash-guard') . '</a>
+                        </p>
+                    </div>
+                </body>
+                </html>';
+                exit;
+        }
+    }
+    
+    /**
+     * Show shutdown page for visitors
+     */
+    private function show_shutdown_page_for_visitor($plugin, $error, $mode, $settings) {
+        $delay = $settings['auto_reload_delay'];
+        
+        if (strpos($error['message'], 'Allowed memory size') !== false) {
+            $this->show_js_redirect_page($_SERVER['REQUEST_URI'] . (strpos($_SERVER['REQUEST_URI'], '?') !== false ? '&' : '?') . 'wpcg_recovery=1');
+            exit;
+        }
+        
+        switch ($mode) {
+            case 'nothing':
+                $this->show_js_redirect_page($_SERVER['REQUEST_URI']);
+                break;
+                
+            case 'stealth':
+            case 'reload':
+                if ($delay > 0) {
+                    header('HTTP/1.1 503 Service Temporarily Unavailable');
+                    header('Status: 503 Service Temporarily Unavailable');
+                    header('Retry-After: ' . $delay);
+                    
+                    echo '<!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="UTF-8">
+                        <meta http-equiv="refresh" content="' . $delay . ';url=' . esc_url($_SERVER['REQUEST_URI']) . '">
+                        <title>' . __('Updating...', 'wp-crash-guard') . '</title>
+                        <style>
+                            body { font-family: Arial, sans-serif; background: #f1f1f1; margin: 0; padding: 20px; text-align: center; }
+                            .container { max-width: 600px; margin: 100px auto; }
+                            .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+                            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="spinner"></div>
+                            <h2>' . __('Updating...', 'wp-crash-guard') . '</h2>
+                            <p>' . sprintf(__('The page will reload automatically in %s seconds.', 'wp-crash-guard'), '<span id="countdown">' . $delay . '</span>') . '</p>
+                            <script>
+                                var count = ' . $delay . ';
+                                setInterval(function() {
+                                    count--;
+                                    if (count >= 0) {
+                                        document.getElementById("countdown").textContent = count;
+                                    }
+                                }, 1000);
+                            </script>
+                        </div>
+                    </body>
+                    </html>';
+                } else {
+                    $this->show_js_redirect_page($_SERVER['REQUEST_URI']);
+                }
+                exit;
+                
+            case 'custom':
+                $message = $settings['custom_message'] ?: '<h1>' . __('Maintenance', 'wp-crash-guard') . '</h1><p>' . __('The site is temporarily under maintenance.', 'wp-crash-guard') . '</p>';
+                header('HTTP/1.1 503 Service Temporarily Unavailable');
+                header('Status: 503 Service Temporarily Unavailable');
+                header('Retry-After: 60');
+                
+                echo '<!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>' . __('Maintenance', 'wp-crash-guard') . '</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; background: #f1f1f1; margin: 0; padding: 20px; text-align: center; }
+                        .container { max-width: 600px; margin: 100px auto; background: white; padding: 30px; border-radius: 5px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        ' . $message . '
+                        <p><a href="' . esc_url($_SERVER['REQUEST_URI']) . '">' . __('Reload the page', 'wp-crash-guard') . '</a></p>
+                    </div>
+                </body>
+                </html>';
+                exit;
+                
+            case 'maintenance':
+            default:
+                header('HTTP/1.1 503 Service Temporarily Unavailable');
+                header('Status: 503 Service Temporarily Unavailable');
+                header('Retry-After: 60');
+                
+                echo '<!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <meta http-equiv="refresh" content="5">
+                    <title>' . __('Maintenance in progress', 'wp-crash-guard') . '</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; background: #f1f1f1; margin: 0; padding: 20px; text-align: center; }
+                        .container { max-width: 600px; margin: 100px auto; }
+                        h1 { color: #333; }
+                        p { color: #666; line-height: 1.6; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <h1>' . __('Maintenance in progress', 'wp-crash-guard') . '</h1>
+                        <p>' . __('We are performing some updates.', 'wp-crash-guard') . '</p>
+                        <p>' . __('The site will be available in a few moments.', 'wp-crash-guard') . '</p>
+                        <p><small>' . __('The page will refresh automatically...', 'wp-crash-guard') . '</small></p>
+                    </div>
+                </body>
+                </html>';
+                exit;
+        }
+    }
+    
+    /**
+     * Handle non-fatal errors
+     */
+    public function handle_error($errno, $errstr, $errfile, $errline) {
+        $settings = $this->get_settings();
+        $error_level_map = [
+            'fatal' => E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR,
+            'warnings' => E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR | E_WARNING | E_USER_WARNING,
+            'notices' => E_ALL & ~E_DEPRECATED & ~E_STRICT,
+        ];
+    
+        $required_level = $error_level_map[$settings['error_reporting_level']];
+    
+        // Check if the current error's severity is within the configured level
+        if (($errno & $required_level) === 0) {
+            return false;
+        }
+    
+        $error = [
+            'type' => $errno,
+            'message' => $errstr,
+            'file' => $errfile,
+            'line' => $errline
+        ];
+    
+        // Only proceed if the error is considered "fatal" by PHP, regardless of the setting
+        if (in_array($errno, [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR])) {
+            $culprit = $this->identify_problematic_plugin($error);
+            if ($culprit && $culprit !== WPCG_PLUGIN_BASENAME) {
+                if ($settings['enable_logging']) {
+                    $this->log_error($culprit, $error);
+                }
+                if ($settings['disable_plugin'] && !$settings['dry_run']) {
+                    $this->deactivate_plugin($culprit);
+                    set_transient('wpcg_plugin_disabled', $culprit, 60);
+                }
+                if (current_user_can('manage_options')) {
+                    $this->show_admin_error_page($culprit, $error, $settings['admin_mode']);
+                } else {
+                    $this->show_visitor_error_page($culprit, $error, $settings['visitor_mode'], $settings);
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Handle uncaught exceptions
+     */
+    public function handle_exception($exception) {
+        $error = [
+            'type' => E_ERROR,
+            'message' => 'Uncaught Exception: ' . $exception->getMessage(),
+            'file' => $exception->getFile(),
+            'line' => $exception->getLine()
+        ];
+        
+        $culprit = $this->identify_problematic_plugin($error);
+        $settings = $this->get_settings();
+        
+        if ($culprit && $culprit !== WPCG_PLUGIN_BASENAME) {
+            if ($settings['enable_logging']) {
+                $this->log_error($culprit, $error);
+            }
+            
+            if ($settings['disable_plugin'] && !$settings['dry_run']) {
+                $this->deactivate_plugin($culprit);
+                set_transient('wpcg_plugin_disabled', $culprit, 60);
+            }
+            
+            if (current_user_can('manage_options')) {
+                $this->show_admin_error_page($culprit, $error, $settings['admin_mode']);
+            } else {
+                $this->show_visitor_error_page($culprit, $error, $settings['visitor_mode'], $settings);
+            }
+        } else {
+            wp_die(
+                '<h1>' . __('A critical error has occurred', 'wp-crash-guard') . '</h1>' .
+                '<p>' . esc_html($exception->getMessage()) . '</p>' .
+                '<p>' . sprintf(__('File: %s:%s', 'wp-crash-guard'), esc_html($exception->getFile()), esc_html($exception->getLine())) . '</p>',
+                'Critical Error',
+                ['response' => 500]
+            );
+        }
+    }
+    
+    /**
+     * Show error page for admin
+     */
+    private function show_admin_error_page($plugin, $error, $mode) {
+        if (strpos($error['message'], 'Allowed memory size') !== false) {
+            $this->show_js_redirect_page(admin_url('admin.php?page=wp-crash-guard&wpcg_recovery=1'));
+            exit;
+        }
+        
+        switch ($mode) {
+            case 'nothing':
+                echo '';
+                exit;
+            case 'reload':
+                $this->show_js_redirect_page(admin_url());
+                exit;
+            case 'simple':
+                $plugin_name = $this->get_plugin_name($plugin);
+                $toast = [
+                    'plugin' => $plugin,
+                    'message' => ($this->get_settings()['dry_run'] ? __('Error detected: ', 'wp-crash-guard') : __('Plugin deactivated: ', 'wp-crash-guard')) . $plugin_name,
+                    'type' => 'warning',
+                    'timestamp' => time()
+                ];
+                $toasts = get_transient('wpcg_toast_notifications') ?: [];
+                $toasts[] = $toast;
+                if (count($toasts) > 5) {
+                    $toasts = array_slice($toasts, -5);
+                }
+                set_transient('wpcg_toast_notifications', $toasts, 60);
+                $this->show_js_redirect_page(admin_url());
+                exit;
+            case 'detailed':
+            default:
+                $plugin_name = $this->get_plugin_name($plugin);
+                $error_message = esc_html($error['message']);
+                
+                wp_die(
+                    '<h1>' . __('Error intercepted by WP Crash Guard', 'wp-crash-guard') . '</h1>' .
+                    '<p>' . sprintf(__('The plugin <strong>%s</strong> has caused a critical error and has been %s.', 'wp-crash-guard'), esc_html($plugin_name), ($this->get_settings()['dry_run'] ? __('detected in dry run mode', 'wp-crash-guard') : __('automatically deactivated', 'wp-crash-guard'))) . '</p>' .
+                    '<p>' . sprintf(__('Error: %s', 'wp-crash-guard'), $error_message) . '</p>' .
+                    '<p><a href="' . esc_url(admin_url()) . '">' . __('Go to Dashboard', 'wp-crash-guard') . '</a> | ' .
+                    '<a href="' . esc_url($_SERVER['REQUEST_URI']) . '">' . __('Reload the page', 'wp-crash-guard') . '</a></p>',
+                    'Plugin Error Detected',
+                    ['response' => 200]
+                );
+                exit;
+        }
+    }
+    
+    /**
+     * Show toast notification
+     */
+    private function show_toast_notification($plugin_name, $error_message) {
+        $toast = [
+            'plugin_name' => $plugin_name,
+            'message' => ($this->get_settings()['dry_run'] ? __('Error detected: ', 'wp-crash-guard') : __('Plugin deactivated: ', 'wp-crash-guard')) . $plugin_name,
+            'type' => 'warning',
+            'timestamp' => time(),
+            'error_message' => $error_message
+        ];
+        $toasts = get_transient('wpcg_toast_notifications') ?: [];
+        $toasts[] = $toast;
+        if (count($toasts) > 5) {
+            $toasts = array_slice($toasts, -5);
+        }
+        set_transient('wpcg_toast_notifications', $toasts, 60);
+    }
+    
+    /**
+     * Show visitor error page
+     */
+    private function show_visitor_error_page($plugin, $error, $mode, $settings) {
+        $delay = $settings['auto_reload_delay'];
+        
+        if (strpos($error['message'], 'Allowed memory size') !== false) {
+            $this->show_js_redirect_page($_SERVER['REQUEST_URI'] . (strpos($_SERVER['REQUEST_URI'], '?') !== false ? '&' : '?') . 'wpcg_recovery=1');
+            exit;
+        }
+        
+        switch ($mode) {
+            case 'nothing':
+                $this->show_js_redirect_page($_SERVER['REQUEST_URI']);
+                break;
+                
+            case 'stealth':
+            case 'reload':
+                if ($delay > 0) {
+                    header('HTTP/1.1 503 Service Temporarily Unavailable');
+                    header('Status: 503 Service Temporarily Unavailable');
+                    header('Retry-After: ' . $delay);
+                    
+                    echo '<!DOCTYPE html>
+                    <html>
+                    <head>
+                        <meta charset="UTF-8">
+                        <meta http-equiv="refresh" content="' . $delay . ';url=' . esc_url($_SERVER['REQUEST_URI']) . '">
+                        <title>' . __('Updating...', 'wp-crash-guard') . '</title>
+                        <style>
+                            body { font-family: Arial, sans-serif; background: #f1f1f1; margin: 0; padding: 20px; text-align: center; }
+                            .container { max-width: 600px; margin: 100px auto; }
+                            .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+                            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="container">
+                            <div class="spinner"></div>
+                            <h2>' . __('Updating...', 'wp-crash-guard') . '</h2>
+                            <p>' . sprintf(__('The page will reload automatically in %s seconds.', 'wp-crash-guard'), '<span id="countdown">' . $delay . '</span>') . '</p>
+                            <script>
+                                var count = ' . $delay . ';
+                                setInterval(function() {
+                                    count--;
+                                    if (count >= 0) {
+                                        document.getElementById("countdown").textContent = count;
+                                    }
+                                }, 1000);
+                            </script>
+                        </div>
+                    </body>
+                    </html>';
+                } else {
+                    $this->show_js_redirect_page($_SERVER['REQUEST_URI']);
+                }
+                exit;
+                
+            case 'custom':
+                $message = $settings['custom_message'] ?: '<h1>' . __('Maintenance', 'wp-crash-guard') . '</h1><p>' . __('The site is temporarily under maintenance.', 'wp-crash-guard') . '</p>';
+                header('HTTP/1.1 503 Service Temporarily Unavailable');
+                header('Status: 503 Service Temporarily Unavailable');
+                header('Retry-After: 60');
+                
+                echo '<!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>' . __('Maintenance', 'wp-crash-guard') . '</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; background: #f1f1f1; margin: 0; padding: 20px; text-align: center; }
+                        .container { max-width: 600px; margin: 100px auto; background: white; padding: 30px; border-radius: 5px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        ' . $message . '
+                        <p><a href="' . esc_url($_SERVER['REQUEST_URI']) . '">' . __('Reload the page', 'wp-crash-guard') . '</a></p>
+                    </div>
+                </body>
+                </html>';
+                exit;
+                
+            case 'maintenance':
+            default:
+                header('HTTP/1.1 503 Service Temporarily Unavailable');
+                header('Status: 503 Service Temporarily Unavailable');
+                header('Retry-After: 60');
+                
+                echo '<!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <meta http-equiv="refresh" content="5">
+                    <title>' . __('Maintenance in progress', 'wp-crash-guard') . '</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; background: #f1f1f1; margin: 0; padding: 20px; text-align: center; }
+                        .container { max-width: 600px; margin: 100px auto; }
+                        h1 { color: #333; }
+                        p { color: #666; line-height: 1.6; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <h1>' . __('Maintenance in progress', 'wp-crash-guard') . '</h1>
+                        <p>' . __('We are performing some updates.', 'wp-crash-guard') . '</p>
+                        <p>' . __('The site will be available in a few moments.', 'wp-crash-guard') . '</p>
+                        <p><small>' . __('The page will refresh automatically...', 'wp-crash-guard') . '</small></p>
+                    </div>
+                </body>
+                </html>';
+                exit;
+        }
+    }
+    
+    /**
+     * Identify the problematic plugin
+     */
+    private function identify_problematic_plugin($error) {
+        $error_file = $error['file'];
+        $plugins_dir = WP_PLUGIN_DIR;
+        
+        if (strpos($error_file, $plugins_dir) !== 0) {
+            return false;
+        }
+        
+        $relative_path = str_replace($plugins_dir . '/', '', $error_file);
+        $parts = explode('/', $relative_path);
+        $plugin_dir = $parts[0];
+        
+        if (!function_exists('get_plugins')) {
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
+        $all_plugins = get_plugins();
+        
+        foreach ($all_plugins as $plugin_file => $plugin_data) {
+            if (strpos($plugin_file, $plugin_dir . '/') === 0 || $plugin_file === $relative_path) {
+                return $plugin_file;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Check if a plugin needs to be deactivated
+     */
+    public function check_recovery_mode() {
+        $plugin_to_disable = get_transient('wpcg_disable_plugin');
+        
+        if (!$plugin_to_disable) {
+            global $wpdb;
+            $plugin_to_disable = $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s",
+                    '_transient_wpcg_disable_plugin'
+                )
+            );
+            
+            if ($plugin_to_disable) {
+                $wpdb->delete($wpdb->options, ['option_name' => '_transient_wpcg_disable_plugin']);
+            }
+        }
+        
+        if ($plugin_to_disable) {
+            $this->deactivate_plugin($plugin_to_disable);
+            delete_transient('wpcg_disable_plugin');
+            set_transient('wpcg_plugin_disabled', $plugin_to_disable, 60);
+        }
+    }
+    
+    /**
+     * Deactivate a plugin safely
+     */
+    private function deactivate_plugin($plugin) {
+        global $wpdb;
+        $active_plugins = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s",
+                'active_plugins'
+            )
+        );
+        
+        if ($active_plugins) {
+            $active_plugins = maybe_unserialize($active_plugins);
+            if (is_array($active_plugins)) {
+                $key = array_search($plugin, $active_plugins);
+                if ($key !== false) {
+                    unset($active_plugins[$key]);
+                    $active_plugins = array_values($active_plugins);
+                    $wpdb->update(
+                        $wpdb->options,
+                        ['option_value' => serialize($active_plugins)],
+                        ['option_name' => 'active_plugins'],
+                        ['%s'],
+                        ['%s']
+                    );
+                    $this->log_action_direct('deactivated', $plugin);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * Direct log of action
+     */
+    private function log_action_direct($action, $plugin) {
+        $settings = $this->get_settings();
+        if (!$settings['enable_logging']) {
+            return;
+        }
+        
+        global $wpdb;
+        $log = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s",
+                'wpcg_action_log'
+            )
+        );
+        $log = maybe_unserialize($log);
+        if (!is_array($log)) {
+            $log = [];
+        }
+        
+        $log[] = [
+            'action' => $action,
+            'plugin' => $plugin,
+            'timestamp' => time(),
+            'user' => get_current_user_id()
+        ];
+        
+        if (count($log) > 100) {
+            $log = array_slice($log, -100);
+        }
+        
+        $serialized = serialize($log);
+        $wpdb->query(
+            $wpdb->prepare(
+                "INSERT INTO {$wpdb->options} (option_name, option_value) VALUES (%s, %s) 
+                 ON DUPLICATE KEY UPDATE option_value = %s",
+                'wpcg_action_log',
+                $serialized,
+                $serialized
+            )
+        );
+    }
+    
+    /**
+     * Log errors
+     */
+    private function log_error($plugin, $error) {
+        $errors = get_option('wpcg_error_log', []);
+        
+        $errors[] = [
+            'plugin' => $plugin,
+            'error' => $error,
+            'timestamp' => current_time('timestamp'),
+            'url' => $_SERVER['REQUEST_URI'] ?? '',
+            'user' => get_current_user_id()
+        ];
+        
+        if (count($errors) > 50) {
+            $errors = array_slice($errors, -50);
+        }
+        
+        update_option('wpcg_error_log', $errors);
+    }
+    
+    /**
+     * Add admin menu
+     */
+    public function add_admin_menu() {
+        add_menu_page(
+            __('WP Crash Guard', 'wp-crash-guard'),
+            __('Crash Guard', 'wp-crash-guard'),
+            'manage_options',
+            'wp-crash-guard',
+            [$this, 'render_admin_page'],
+            'dashicons-shield-alt',
+            99
+        );
+        add_submenu_page(
+            'wp-crash-guard',
+            __('Settings - WP Crash Guard', 'wp-crash-guard'),
+            __('Settings', 'wp-crash-guard'),
+            'manage_options',
+            'wp-crash-guard-settings',
+            [$this, 'render_settings_page']
+        );
+    }
+    
+    /**
+     * Show admin notices
+     */
+    public function show_admin_notices() {
+        if (isset($_GET['wpcg_installed'])) {
+            ?>
+            <div class="notice notice-success is-dismissible">
+                <p>
+                    <strong><?php esc_html_e('WP Crash Guard:', 'wp-crash-guard'); ?></strong>
+                    <?php esc_html_e('Installation complete! The plugin is now a Must-Use Plugin and proactively protects your site.', 'wp-crash-guard'); ?>
+                </p>
+            </div>
+            <?php
+        }
+        
+        $disabled_plugin = get_transient('wpcg_plugin_disabled');
+        $settings = $this->get_settings();
+        if ($disabled_plugin && !$settings['dry_run']) {
+            $plugin_name = $this->get_plugin_name($disabled_plugin);
+            ?>
+            <div class="notice notice-warning is-dismissible">
+                <p>
+                    <strong><?php esc_html_e('WP Crash Guard:', 'wp-crash-guard'); ?></strong>
+                    <?php printf(esc_html__('The plugin "%s" was automatically deactivated because it was causing a critical error.', 'wp-crash-guard'), esc_html($plugin_name)); ?>
+                    <a href="<?php echo admin_url('admin.php?page=wp-crash-guard'); ?>"><?php esc_html_e('View details', 'wp-crash-guard'); ?></a>
+                </p>
+            </div>
+            <?php
+            delete_transient('wpcg_plugin_disabled');
+        }
+        
+        if ($disabled_plugin && $settings['dry_run']) {
+            $plugin_name = $this->get_plugin_name($disabled_plugin);
+            ?>
+            <div class="notice notice-info is-dismissible">
+                <p>
+                    <strong><?php esc_html_e('WP Crash Guard:', 'wp-crash-guard'); ?></strong>
+                    <?php printf(esc_html__('Dry Run Mode active. The plugin "%s" caused a critical error, but was not deactivated.', 'wp-crash-guard'), esc_html($plugin_name)); ?>
+                    <a href="<?php echo admin_url('admin.php?page=wp-crash-guard'); ?>"><?php esc_html_e('View details', 'wp-crash-guard'); ?></a>
+                </p>
+            </div>
+            <?php
+            delete_transient('wpcg_plugin_disabled');
+        }
+        
+        if (isset($_GET['wpcg_recovery']) && $settings['visitor_mode'] !== 'nothing' && $settings['admin_mode'] !== 'nothing') {
+            ?>
+            <div class="notice notice-info is-dismissible">
+                <p>
+                    <strong><?php esc_html_e('WP Crash Guard:', 'wp-crash-guard'); ?></strong>
+                    <?php esc_html_e('Recovery mode active. The site has been restored after a critical error.', 'wp-crash-guard'); ?>
+                </p>
+            </div>
+            <?php
+        }
+    }
+    
+    /**
+     * Show toast notifications
+     */
+    public function show_toast_notifications() {
+        if (!is_admin() && !current_user_can('manage_options')) {
+            return;
+        }
+        
+        $toasts = get_transient('wpcg_toast_notifications');
+        if (!$toasts || empty($toasts)) {
+            return;
+        }
+        
+        delete_transient('wpcg_toast_notifications');
+        
+        ?>
+        <div id="wpcg-toast-container" style="position: fixed; top: <?php echo is_admin() ? '20px' : (is_admin_bar_showing() ? '52px' : '20px'); ?>; right: 20px; z-index: 999999;">
+            <?php foreach ($toasts as $index => $toast): ?>
+                <div class="wpcg-toast wpcg-toast-<?php echo $index; ?>" style="
+                    background: <?php echo $toast['type'] === 'error' ? '#f44336' : ($toast['type'] === 'success' ? '#4CAF50' : '#ff9800'); ?>;
+                    color: white;
+                    padding: 16px 24px;
+                    border-radius: 4px;
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+                    margin-bottom: 10px;
+                    min-width: 300px;
+                    max-width: 500px;
+                    animation: wpcgSlideIn 0.3s ease-out;
+                    display: flex;
+                    align-items: flex-start;
+                    justify-content: space-between;
+                ">
+                    <div style="flex: 1;">
+                        <div style="font-weight: bold; margin-bottom: 4px;">
+                            <span style="margin-right: 8px;">🛡️</span><?php esc_html_e('WP Crash Guard', 'wp-crash-guard'); ?>
+                        </div>
+                        <div style="font-size: 14px;"><?php echo esc_html($toast['message']); ?></div>
+                    </div>
+                    <button onclick="this.parentElement.remove()" style="
+                        background: none;
+                        border: none;
+                        color: white;
+                        font-size: 20px;
+                        cursor: pointer;
+                        margin-left: 20px;
+                        line-height: 1;
+                        padding: 0;
+                        opacity: 0.8;
+                    " onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">&times;</button>
+                </div>
+            <?php endforeach; ?>
+        </div>
+        <style>
+            @keyframes wpcgSlideIn {
+                from { transform: translateX(100%); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+            }
+            @keyframes wpcgSlideOut {
+                from { transform: translateX(0); opacity: 1; }
+                to { transform: translateX(100%); opacity: 0; }
+            }
+            @media (max-width: 600px) {
+                #wpcg-toast-container {
+                    left: 10px !important;
+                    right: 10px !important;
+                    width: auto !important;
+                }
+                .wpcg-toast {
+                    min-width: auto !important;
+                    max-width: none !important;
+                }
+            }
+        </style>
+        <script>
+            (function() {
+                <?php foreach ($toasts as $index => $toast): ?>
+                    (function(index) {
+                        var timeoutId;
+                        var toast = document.querySelector(".wpcg-toast-" + index);
+                        
+                        if (!toast) return;
+                        
+                        function startDismiss() {
+                            timeoutId = setTimeout(function() {
+                                toast.style.animation = "wpcgSlideOut 0.3s ease-in forwards";
+                                setTimeout(function() { 
+                                    if (toast && toast.parentNode) {
+                                        toast.remove(); 
+                                    }
+                                }, 300);
+                            }, <?php echo 5000 + ($index * 500); ?>);
+                        }
+                        
+                        toast.addEventListener("mouseenter", function() {
+                            clearTimeout(timeoutId);
+                        });
+                        
+                        toast.addEventListener("mouseleave", function() {
+                            startDismiss();
+                        });
+                        
+                        startDismiss();
+                    })(<?php echo $index; ?>);
+                <?php endforeach; ?>
+            })();
+        </script>
+        <?php
+    }
+    
+    /**
+     * Render admin page
+     */
+    public function render_admin_page() {
+        ?>
+        <div class="wrap">
+            <h1><?php esc_html_e('WP Crash Guard', 'wp-crash-guard'); ?></h1>
+            <div class="notice notice-info inline">
+                <p><?php esc_html_e('WP Crash Guard protects your WordPress site by automatically deactivating plugins that cause critical errors. It is installed as a **Must-Use Plugin** to ensure maximum protection.', 'wp-crash-guard'); ?></p>
+            </div>
+            <?php
+            $active_tab = isset($_GET['tab']) ? $_GET['tab'] : 'errors';
+            ?>
+            <h2 class="nav-tab-wrapper">
+                <a href="?page=wp-crash-guard&tab=errors" class="nav-tab <?php echo $active_tab === 'errors' ? 'nav-tab-active' : ''; ?>">
+                    <?php esc_html_e('Recent Errors', 'wp-crash-guard'); ?>
+                </a>
+                <a href="?page=wp-crash-guard&tab=log" class="nav-tab <?php echo $active_tab === 'log' ? 'nav-tab-active' : ''; ?>">
+                    <?php esc_html_e('Action Log', 'wp-crash-guard'); ?>
+                </a>
+            </h2>
+            <?php
+            if ($active_tab === 'errors') {
+                $this->render_errors_tab();
+            } else {
+                $this->render_log_tab();
+            }
+            ?>
+        </div>
+        <?php
+    }
+    
+    /**
+     * Render errors tab
+     */
+    private function render_errors_tab() {
+        $errors = get_option('wpcg_error_log', []);
+        if (empty($errors)) {
+            echo '<p>' . esc_html__('No errors detected.', 'wp-crash-guard') . '</p>';
+            return;
+        }
+        
+        ?>
+        <table class="wp-list-table widefat fixed striped">
+            <thead>
+                <tr>
+                    <th style="width: 200px;"><?php esc_html_e('Plugin', 'wp-crash-guard'); ?></th>
+                    <th><?php esc_html_e('Error', 'wp-crash-guard'); ?></th>
+                    <th style="width: 150px;"><?php esc_html_e('Date/Time', 'wp-crash-guard'); ?></th>
+                    <th style="width: 100px;"><?php esc_html_e('User', 'wp-crash-guard'); ?></th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach (array_reverse($errors) as $error): ?>
+                    <tr>
+                        <td><?php echo esc_html($this->get_plugin_name($error['plugin'])); ?></td>
+                        <td>
+                            <strong><?php echo esc_html($error['error']['message']); ?></strong><br>
+                            <small><?php echo esc_html($error['error']['file'] . ':' . $error['error']['line']); ?></small>
+                            <?php if (strpos($error['error']['message'], 'Allowed memory size') !== false): ?>
+                                <br><em style="color: #d63638;">⚠️ <?php esc_html_e('Memory error - consider increasing PHP memory_limit', 'wp-crash-guard'); ?></em>
+                            <?php endif; ?>
+                        </td>
+                        <td><?php echo date_i18n('d/m/Y H:i', $error['timestamp']); ?></td>
+                        <td><?php echo $this->get_user_name($error['user']); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        
+        <form method="post" style="margin-top: 20px;">
+            <?php wp_nonce_field('wpcg_clear_errors'); ?>
+            <input type="hidden" name="wpcg_action" value="clear_errors">
+            <button type="submit" class="button"><?php esc_html_e('Clear Error Log', 'wp-crash-guard'); ?></button>
+        </form>
+        <?php
+    }
+    
+    /**
+     * Render log tab
+     */
+    private function render_log_tab() {
+        $logs = get_option('wpcg_action_log', []);
+        if (empty($logs)) {
+            echo '<p>' . esc_html__('No actions logged.', 'wp-crash-guard') . '</p>';
+            return;
+        }
+        
+        ?>
+        <table class="wp-list-table widefat fixed striped">
+            <thead>
+                <tr>
+                    <th style="width: 150px;"><?php esc_html_e('Action', 'wp-crash-guard'); ?></th>
+                    <th><?php esc_html_e('Plugin', 'wp-crash-guard'); ?></th>
+                    <th style="width: 150px;"><?php esc_html_e('Date/Time', 'wp-crash-guard'); ?></th>
+                    <th style="width: 100px;"><?php esc_html_e('User', 'wp-crash-guard'); ?></th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach (array_reverse($logs) as $log): ?>
+                    <tr>
+                        <td><?php echo esc_html($log['action']); ?></td>
+                        <td><?php echo esc_html($this->get_plugin_name($log['plugin'])); ?></td>
+                        <td><?php echo date_i18n('d/m/Y H:i', $log['timestamp']); ?></td>
+                        <td><?php echo $this->get_user_name($log['user']); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        
+        <form method="post" style="margin-top: 20px;">
+            <?php wp_nonce_field('wpcg_clear_logs'); ?>
+            <input type="hidden" name="wpcg_action" value="clear_logs">
+            <button type="submit" class="button"><?php esc_html_e('Clear Log', 'wp-crash-guard'); ?></button>
+        </form>
+        <?php
+    }
+    
+    /**
+     * Handle admin actions
+     */
+    public function handle_admin_actions() {
+        if (!isset($_POST['wpcg_action'])) {
+            return;
+        }
+        
+        if ($_POST['wpcg_action'] === 'clear_errors' && wp_verify_nonce($_POST['_wpnonce'], 'wpcg_clear_errors')) {
+            update_option('wpcg_error_log', []);
+            wp_redirect(admin_url('admin.php?page=wp-crash-guard&tab=errors&cleared=1'));
+            exit;
+        }
+        
+        if ($_POST['wpcg_action'] === 'clear_logs' && wp_verify_nonce($_POST['_wpnonce'], 'wpcg_clear_logs')) {
+            update_option('wpcg_action_log', []);
+            wp_redirect(admin_url('admin.php?page=wp-crash-guard&tab=log&cleared=1'));
+            exit;
+        }
+        
+        if ($_POST['wpcg_action'] === 'save_settings' && wp_verify_nonce($_POST['_wpnonce'], 'wpcg_save_settings')) {
+            $this->save_settings();
+            wp_redirect(admin_url('admin.php?page=wp-crash-guard-settings&saved=1'));
+            exit;
+        }
+    }
+    
+    /**
+     * Save settings
+     */
+    private function save_settings() {
+        $settings = [
+            'visitor_mode' => sanitize_text_field($_POST['wpcg_visitor_mode'] ?? 'maintenance'),
+            'admin_mode' => sanitize_text_field($_POST['wpcg_admin_mode'] ?? 'detailed'),
+            'auto_reload_delay' => intval($_POST['wpcg_auto_reload_delay'] ?? 5),
+            'custom_message' => wp_kses_post($_POST['wpcg_custom_message'] ?? ''),
+            'enable_logging' => isset($_POST['wpcg_enable_logging']) ? 1 : 0,
+            'disable_plugin' => isset($_POST['wpcg_disable_plugin']) ? 1 : 0,
+            'dry_run' => isset($_POST['wpcg_dry_run']) ? 1 : 0,
+            'error_reporting_level' => sanitize_text_field($_POST['wpcg_error_reporting_level'] ?? 'fatal'),
+        ];
+        
+        update_option('wpcg_settings', $settings);
+    }
+    
+    /**
+     * Get settings
+     */
+    private function get_settings() {
+        $defaults = [
+            'visitor_mode' => 'maintenance',
+            'admin_mode' => 'simple',
+            'auto_reload_delay' => 5,
+            'custom_message' => '',
+            'enable_logging' => 1,
+            'disable_plugin' => 1,
+            'dry_run' => 0,
+            'error_reporting_level' => 'fatal',
+        ];
+        
+        return wp_parse_args(get_option('wpcg_settings', []), $defaults);
+    }
+    
+    /**
+     * Render settings page
+     */
+    public function render_settings_page() {
+        $settings = $this->get_settings();
+        ?>
+        <div class="wrap">
+            <h1><?php esc_html_e('WP Crash Guard Settings', 'wp-crash-guard'); ?></h1>
+            
+            <?php if (isset($_GET['saved'])): ?>
+                <div class="notice notice-success is-dismissible">
+                    <p><?php esc_html_e('Settings saved successfully!', 'wp-crash-guard'); ?></p>
+                </div>
+            <?php endif; ?>
+            
+            <form method="post" action="">
+                <?php wp_nonce_field('wpcg_save_settings'); ?>
+                <input type="hidden" name="wpcg_action" value="save_settings">
+                
+                <table class="form-table">
+                    <tr>
+                        <th scope="row">
+                            <label for="wpcg_visitor_mode"><?php esc_html_e('Behavior for Visitors', 'wp-crash-guard'); ?></label>
+                        </th>
+                        <td>
+                            <select name="wpcg_visitor_mode" id="wpcg_visitor_mode">
+                                <option value="nothing" <?php selected($settings['visitor_mode'], 'nothing'); ?>>
+                                    <?php esc_html_e('Do nothing (silently deactivate plugin)', 'wp-crash-guard'); ?>
+                                </option>
+                                <option value="reload" <?php selected($settings['visitor_mode'], 'reload'); ?>>
+                                    <?php esc_html_e('Automatically reload the page', 'wp-crash-guard'); ?>
+                                </option>
+                                <option value="maintenance" <?php selected($settings['visitor_mode'], 'maintenance'); ?>>
+                                    <?php esc_html_e('Show maintenance page', 'wp-crash-guard'); ?>
+                                </option>
+                                <option value="custom" <?php selected($settings['visitor_mode'], 'custom'); ?>>
+                                    <?php esc_html_e('Show custom message', 'wp-crash-guard'); ?>
+                                </option>
+                                <option value="stealth" <?php selected($settings['visitor_mode'], 'stealth'); ?>>
+                                    <?php esc_html_e('Stealth mode (silent redirect)', 'wp-crash-guard'); ?>
+                                </option>
+                            </select>
+                            <p class="description">
+                                <?php esc_html_e('What to show visitors after deactivating the problematic plugin', 'wp-crash-guard'); ?>
+                            </p>
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <th scope="row">
+                            <label for="wpcg_admin_mode"><?php esc_html_e('Behavior for Admins', 'wp-crash-guard'); ?></label>
+                        </th>
+                        <td>
+                            <select name="wpcg_admin_mode" id="wpcg_admin_mode">
+                                <option value="detailed" <?php selected($settings['admin_mode'], 'detailed'); ?>>
+                                    <?php esc_html_e('Show full error details (blocking page)', 'wp-crash-guard'); ?>
+                                </option>
+                                <option value="simple" <?php selected($settings['admin_mode'], 'simple'); ?>>
+                                    <?php esc_html_e('Show toast notification (non-blocking)', 'wp-crash-guard'); ?>
+                                </option>
+                                <option value="reload" <?php selected($settings['admin_mode'], 'reload'); ?>>
+                                    <?php esc_html_e('Automatically reload', 'wp-crash-guard'); ?>
+                                </option>
+                                <option value="nothing" <?php selected($settings['admin_mode'], 'nothing'); ?>>
+                                    <?php esc_html_e('Show nothing (dashboard notification only)', 'wp-crash-guard'); ?>
+                                </option>
+                            </select>
+                            <p class="description">
+                                <?php esc_html_e('What to show to administrators after deactivating the problematic plugin', 'wp-crash-guard'); ?><br>
+                                <strong><?php esc_html_e('Toast:', 'wp-crash-guard'); ?></strong> <?php esc_html_e('A temporary, non-blocking notification that appears in the top right.', 'wp-crash-guard'); ?>
+                            </p>
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <th scope="row">
+                            <label for="wpcg_auto_reload_delay"><?php esc_html_e('Reload Delay (seconds)', 'wp-crash-guard'); ?></label>
+                        </th>
+                        <td>
+                            <input type="number" name="wpcg_auto_reload_delay" id="wpcg_auto_reload_delay" 
+                                   value="<?php echo esc_attr($settings['auto_reload_delay']); ?>" 
+                                   min="0" max="60" step="1">
+                            <p class="description">
+                                <?php esc_html_e('Seconds to wait before automatically reloading (0 = immediate)', 'wp-crash-guard'); ?>
+                            </p>
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <th scope="row">
+                            <label for="wpcg_custom_message"><?php esc_html_e('Custom Message', 'wp-crash-guard'); ?></label>
+                        </th>
+                        <td>
+                            <textarea name="wpcg_custom_message" id="wpcg_custom_message" 
+                                      rows="4" cols="50" class="large-text"><?php echo esc_textarea($settings['custom_message']); ?></textarea>
+                            <p class="description">
+                                <?php esc_html_e('Message to display when the "custom message" option is selected.', 'wp-crash-guard'); ?><br>
+                                <?php esc_html_e('You can use HTML. Leave empty to use the default message.', 'wp-crash-guard'); ?>
+                            </p>
+                        </td>
+                    </tr>
+                    
+                    <tr>
+                        <th scope="row">
+                            <label for="wpcg_error_reporting_level"><?php esc_html_e('Error Interception Threshold', 'wp-crash-guard'); ?></label>
+                        </th>
+                        <td>
+                            <select name="wpcg_error_reporting_level" id="wpcg_error_reporting_level">
+                                <option value="fatal" <?php selected($settings['error_reporting_level'], 'fatal'); ?>>
+                                    <?php esc_html_e('Fatal Errors (E_ERROR)', 'wp-crash-guard'); ?>
+                                </option>
+                                <option value="warnings" <?php selected($settings['error_reporting_level'], 'warnings'); ?>>
+                                    <?php esc_html_e('Warnings & Above (E_WARNING)', 'wp-crash-guard'); ?>
+                                </option>
+                                <option value="notices" <?php selected($settings['error_reporting_level'], 'notices'); ?>>
+                                    <?php esc_html_e('Notices & Above (E_NOTICE)', 'wp-crash-guard'); ?>
+                                </option>
+                            </select>
+                            <p class="description">
+                                <?php esc_html_e('Choose the minimum error level that should trigger a plugin deactivation.', 'wp-crash-guard'); ?><br>
+                                <strong><?php esc_html_e('Fatal Errors (default):', 'wp-crash-guard'); ?></strong> <?php esc_html_e('Only intervenes for critical errors that would crash the site.', 'wp-crash-guard'); ?><br>
+                                <strong><?php esc_html_e('Warnings & Above:', 'wp-crash-guard'); ?></strong> <?php esc_html_e('Also intervenes for less critical warnings that could indicate a future problem.', 'wp-crash-guard'); ?><br>
+                                <strong><?php esc_html_e('Notices & Above:', 'wp-crash-guard'); ?></strong> <?php esc_html_e('Intervenes for all PHP issues. May lead to unintended deactivations.', 'wp-crash-guard'); ?>
+                            </p>
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <th scope="row"><?php esc_html_e('Advanced Options', 'wp-crash-guard'); ?></th>
+                        <td>
+                            <fieldset>
+                                <label>
+                                    <input type="checkbox" name="wpcg_disable_plugin" value="1" 
+                                           <?php checked($settings['disable_plugin'], 1); ?>>
+                                    <?php esc_html_e('Automatically deactivate problematic plugins', 'wp-crash-guard'); ?>
+                                </label>
+                                <p class="description">
+                                    <?php esc_html_e('If disabled, it will only log the error without deactivating the plugin.', 'wp-crash-guard'); ?><br>
+                                    <strong><?php esc_html_e('Warning:', 'wp-crash-guard'); ?></strong> <?php esc_html_e('Disabling this option might leave the site non-functional!', 'wp-crash-guard'); ?>
+                                </p>
+                                
+                                <br>
+                                
+                                <label>
+                                    <input type="checkbox" name="wpcg_dry_run" value="1" 
+                                           <?php checked($settings['dry_run'], 1); ?>>
+                                    <?php esc_html_e('Enable Dry Run Mode', 'wp-crash-guard'); ?>
+                                </label>
+                                <p class="description">
+                                    <?php esc_html_e('In this mode, the plugin will detect and log errors but will NOT deactivate plugins.', 'wp-crash-guard'); ?><br>
+                                    <?php esc_html_e('Useful for testing and diagnostics without impacting the live site.', 'wp-crash-guard'); ?>
+                                </p>
+                                
+                                <br>
+
+                                <label>
+                                    <input type="checkbox" name="wpcg_enable_logging" value="1" 
+                                           <?php checked($settings['enable_logging'], 1); ?>>
+                                    <?php esc_html_e('Enable error logging', 'wp-crash-guard'); ?>
+                                </label>
+                                <p class="description">
+                                    <?php esc_html_e('Logs all intercepted errors to the database.', 'wp-crash-guard'); ?>
+                                </p>
+                            </fieldset>
+                        </td>
+                    </tr>
+                </table>
+                
+                <p class="submit">
+                    <button type="submit" class="button button-primary"><?php esc_html_e('Save Settings', 'wp-crash-guard'); ?></button>
+                </p>
+            </form>
+            
+            <div class="notice notice-info">
+                <h3><?php esc_html_e('Settings Suggestions:', 'wp-crash-guard'); ?></h3>
+                <ul>
+                    <li><strong><?php esc_html_e('For development/testing:', 'wp-crash-guard'); ?></strong> <?php esc_html_e('Admin = "Toast notification", Visitors = "Do nothing"', 'wp-crash-guard'); ?></li>
+                    <li><strong><?php esc_html_e('For staging:', 'wp-crash-guard'); ?></strong> <?php esc_html_e('Admin = "Toast notification", Visitors = "Maintenance"', 'wp-crash-guard'); ?></li>
+                    <li><strong><?php esc_html_e('For production:', 'wp-crash-guard'); ?></strong> <?php esc_html_e('Admin = "Do nothing", Visitors = "Do nothing" (maximum transparency)', 'wp-crash-guard'); ?></li>
+                </ul>
+                <h3><?php esc_html_e('Mode Guide:', 'wp-crash-guard'); ?></h3>
+                <ul>
+                    <li><strong><?php esc_html_e('Do nothing:', 'wp-crash-guard'); ?></strong> <?php esc_html_e('The problematic plugin is silently deactivated without showing any messages.', 'wp-crash-guard'); ?></li>
+                    <li><strong><?php esc_html_e('Toast notification (Admin):', 'wp-crash-guard'); ?></strong> <?php esc_html_e('Shows a temporary, non-blocking notification in the top right that disappears after 5 seconds.', 'wp-crash-guard'); ?></li>
+                    <li><strong><?php esc_html_e('Automatically reload:', 'wp-crash-guard'); ?></strong> <?php esc_html_e('Deactivates the plugin and reloads the page after the set delay.', 'wp-crash-guard'); ?></li>
+                    <li><strong><?php esc_html_e('Maintenance page:', 'wp-crash-guard'); ?></strong> <?php esc_html_e('Shows a professional maintenance page while the plugin is being deactivated.', 'wp-crash-guard'); ?></li>
+                    <li><strong><?php esc_html_e('Custom message:', 'wp-crash-guard'); ?></strong> <?php esc_html_e('Shows your personalized message after deactivation.', 'wp-crash-guard'); ?></li>
+                    <li><strong><?php esc_html_e('Stealth mode:', 'wp-crash-guard'); ?></strong> <?php esc_html_e('Immediate redirect after deactivation (similar to reloading with 0 seconds).', 'wp-crash-guard'); ?></li>
+                </ul>
+                <p><strong><?php esc_html_e('Note:', 'wp-crash-guard'); ?></strong> <?php esc_html_e('In all modes, the problematic plugin is always deactivated (if the option is enabled). The only difference is what is shown to the user.', 'wp-crash-guard'); ?></p>
+                <p><strong><?php esc_html_e('Memory Errors:', 'wp-crash-guard'); ?></strong> <?php esc_html_e('Out of memory errors are handled with an automatic redirect for all modes to ensure site recovery.', 'wp-crash-guard'); ?></p>
+                <p><strong><?php esc_html_e('Important:', 'wp-crash-guard'); ?></strong> <?php esc_html_e('If you are testing and see messages you do not want, make sure you have configured the appropriate modes above.', 'wp-crash-guard'); ?></p>
+            </div>
+        </div>
+        <?php
+    }
+    
+    /**
+     * Get plugin name
+     */
+    private function get_plugin_name($plugin_file) {
+        if (!function_exists('get_plugin_data')) {
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
+        $plugin_path = WP_PLUGIN_DIR . '/' . $plugin_file;
+        if (file_exists($plugin_path)) {
+            $plugin_data = get_plugin_data($plugin_path, false, false);
+            return $plugin_data['Name'] ?: $plugin_file;
+        }
+        return $plugin_file;
+    }
+    
+    /**
+     * Get user name
+     */
+    private function get_user_name($user_id) {
+        if (!$user_id) {
+            return '-';
+        }
+        $user = get_userdata($user_id);
+        return $user ? $user->display_name : '-';
+    }
+    
+    /**
+     * When a plugin is activated
+     */
+    public function on_plugin_activated($plugin, $network_wide) {
+        $settings = $this->get_settings();
+        if (!$settings['enable_logging']) {
+            return;
+        }
+        $log = get_option('wpcg_action_log', []);
+        $log[] = [
+            'action' => 'activated',
+            'plugin' => $plugin,
+            'timestamp' => current_time('timestamp'),
+            'user' => get_current_user_id()
+        ];
+        if (count($log) > 100) {
+            $log = array_slice($log, -100);
+        }
+        update_option('wpcg_action_log', $log);
+    }
+
+    /**
+     * Check if in admin context
+     */
+    private function is_admin_context() {
+        return (defined('DOING_AJAX') && DOING_AJAX) || (defined('WP_ADMIN') && WP_ADMIN);
+    }
+}
+
+// Initialize the plugin IMMEDIATELY to catch all errors
+WP_Crash_Guard::get_instance();

@@ -1,0 +1,535 @@
+# Copyright (C) 2024 Microcodice
+# This file is distributed under the GPL v2 or later.
+msgid ""
+msgstr ""
+"Project-Id-Version: WP Crash Guard 1.4.0\n"
+"Report-Msgid-Bugs-To: https://github.com/microcodice/wp-crash-guard/issues\n"
+"POT-Creation-Date: 2024-01-20 10:00:00+00:00\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+
+#: wp-crash-guard.php:187
+msgid "Restoring Site..."
+msgstr ""
+
+#: wp-crash-guard.php:195
+msgid "Restoring your site..."
+msgstr ""
+
+#: wp-crash-guard.php:196
+msgid "Please wait, the site is being restored after a critical error."
+msgstr ""
+
+#: wp-crash-guard.php:229
+msgid "Plugin deactivated after critical error: "
+msgstr ""
+
+#: wp-crash-guard.php:242
+msgid "Error: "
+msgstr ""
+
+#: wp-crash-guard.php:243
+msgid "File: %s on line %s"
+msgstr ""
+
+#: wp-crash-guard.php:246
+msgid "Error Intercepted - WP Crash Guard"
+msgstr ""
+
+#: wp-crash-guard.php:258
+msgid "Error Intercepted!"
+msgstr ""
+
+#: wp-crash-guard.php:259
+msgid "WP Crash Guard"
+msgstr ""
+
+#: wp-crash-guard.php:259
+msgid "has detected a critical error caused by the plugin:"
+msgstr ""
+
+#: wp-crash-guard.php:262
+msgid "The plugin will be automatically deactivated on the next page load."
+msgstr ""
+
+#: wp-crash-guard.php:264
+msgid "Reload the page"
+msgstr ""
+
+#: wp-crash-guard.php:265
+msgid "Go to Dashboard"
+msgstr ""
+
+#: wp-crash-guard.php:299 wp-crash-guard.php:532
+msgid "Updating..."
+msgstr ""
+
+#: wp-crash-guard.php:308 wp-crash-guard.php:541
+msgid "The page will reload automatically in %s seconds."
+msgstr ""
+
+#: wp-crash-guard.php:322 wp-crash-guard.php:328 wp-crash-guard.php:555 wp-crash-guard.php:561
+msgid "Maintenance"
+msgstr ""
+
+#: wp-crash-guard.php:322 wp-crash-guard.php:555
+msgid "The site is temporarily under maintenance."
+msgstr ""
+
+#: wp-crash-guard.php:340 wp-crash-guard.php:358 wp-crash-guard.php:573 wp-crash-guard.php:591
+msgid "Maintenance in progress"
+msgstr ""
+
+#: wp-crash-guard.php:349 wp-crash-guard.php:582
+msgid "We are performing some updates."
+msgstr ""
+
+#: wp-crash-guard.php:350 wp-crash-guard.php:583
+msgid "The site will be available in a few moments."
+msgstr ""
+
+#: wp-crash-guard.php:351 wp-crash-guard.php:584
+msgid "The page will refresh automatically..."
+msgstr ""
+
+#: wp-crash-guard.php:450
+msgid "Error detected: "
+msgstr ""
+
+#: wp-crash-guard.php:450
+msgid "Plugin deactivated: "
+msgstr ""
+
+#: wp-crash-guard.php:464 wp-crash-guard.php:496
+msgid "detected in dry run mode"
+msgstr ""
+
+#: wp-crash-guard.php:464 wp-crash-guard.php:496
+msgid "automatically deactivated"
+msgstr ""
+
+#: wp-crash-guard.php:464
+msgid "Error intercepted by WP Crash Guard"
+msgstr ""
+
+#: wp-crash-guard.php:465
+msgid "The plugin <strong>%s</strong> has caused a critical error and has been %s."
+msgstr ""
+
+#: wp-crash-guard.php:466
+msgid "Error: %s"
+msgstr ""
+
+#: wp-crash-guard.php:492
+msgid "A critical error has occurred"
+msgstr ""
+
+#: wp-crash-guard.php:494
+msgid "File: %s:%s"
+msgstr ""
+
+#: wp-crash-guard.php:869
+msgid "Crash Guard"
+msgstr ""
+
+#: wp-crash-guard.php:877 wp-crash-guard.php:1268
+msgid "Settings"
+msgstr ""
+
+#: wp-crash-guard.php:879
+msgid "Settings - WP Crash Guard"
+msgstr ""
+
+#: wp-crash-guard.php:893 wp-crash-guard.php:894
+msgid "WP Crash Guard:"
+msgstr ""
+
+#: wp-crash-guard.php:894
+msgid "Installation complete! The plugin is now a Must-Use Plugin and proactively protects your site."
+msgstr ""
+
+#: wp-crash-guard.php:905
+msgid "The plugin \"%s\" was automatically deactivated because it was causing a critical error."
+msgstr ""
+
+#: wp-crash-guard.php:906 wp-crash-guard.php:917
+msgid "View details"
+msgstr ""
+
+#: wp-crash-guard.php:916
+msgid "Dry Run Mode active. The plugin \"%s\" caused a critical error, but was not deactivated."
+msgstr ""
+
+#: wp-crash-guard.php:927
+msgid "Recovery mode active. The site has been restored after a critical error."
+msgstr ""
+
+#: wp-crash-guard.php:936 wp-crash-guard.php:1264
+msgid "Settings saved successfully!"
+msgstr ""
+
+#: wp-crash-guard.php:1020 wp-crash-guard.php:1021
+msgid "WP Crash Guard protects your WordPress site by automatically deactivating plugins that cause critical errors. It is installed as a **Must-Use Plugin** to ensure maximum protection."
+msgstr ""
+
+#: wp-crash-guard.php:1027
+msgid "Recent Errors"
+msgstr ""
+
+#: wp-crash-guard.php:1030
+msgid "Action Log"
+msgstr ""
+
+#: wp-crash-guard.php:1033 wp-crash-guard.php:1194
+msgid "Whitelist"
+msgstr ""
+
+#: wp-crash-guard.php:1058
+msgid "No errors detected."
+msgstr ""
+
+#: wp-crash-guard.php:1066 wp-crash-guard.php:1102
+msgid "Plugin"
+msgstr ""
+
+#: wp-crash-guard.php:1067
+msgid "Error"
+msgstr ""
+
+#: wp-crash-guard.php:1068 wp-crash-guard.php:1104
+msgid "Date/Time"
+msgstr ""
+
+#: wp-crash-guard.php:1069 wp-crash-guard.php:1105
+msgid "User"
+msgstr ""
+
+#: wp-crash-guard.php:1080
+msgid "Memory error - consider increasing PHP memory_limit"
+msgstr ""
+
+#: wp-crash-guard.php:1092
+msgid "Clear Error Log"
+msgstr ""
+
+#: wp-crash-guard.php:1100
+msgid "No actions logged."
+msgstr ""
+
+#: wp-crash-guard.php:1103
+msgid "Action"
+msgstr ""
+
+#: wp-crash-guard.php:1120
+msgid "Clear Log"
+msgstr ""
+
+#: wp-crash-guard.php:1194
+msgid "Plugin Whitelist"
+msgstr ""
+
+#: wp-crash-guard.php:1195
+msgid "Select plugins that should be excluded from WP Crash Guard monitoring. Whitelisted plugins will never be deactivated, even if they cause errors."
+msgstr ""
+
+#: wp-crash-guard.php:1217
+msgid "Search plugins..."
+msgstr ""
+
+#: wp-crash-guard.php:1239
+msgid "by"
+msgstr ""
+
+#: wp-crash-guard.php:1245 wp-crash-guard.php:1435
+msgid "Active"
+msgstr ""
+
+#: wp-crash-guard.php:1245 wp-crash-guard.php:1435
+msgid "Inactive"
+msgstr ""
+
+#: wp-crash-guard.php:1253
+msgid "Save Whitelist"
+msgstr ""
+
+#: wp-crash-guard.php:1258
+msgid "%d plugin whitelisted"
+msgid_plural "%d plugins whitelisted"
+msgstr[0] ""
+msgstr[1] ""
+
+#: wp-crash-guard.php:1307 wp-crash-guard.php:1435
+msgid "WP Crash Guard Settings"
+msgstr ""
+
+#: wp-crash-guard.php:1321
+msgid "Behavior for Visitors"
+msgstr ""
+
+#: wp-crash-guard.php:1326
+msgid "Do nothing (silently deactivate plugin)"
+msgstr ""
+
+#: wp-crash-guard.php:1329
+msgid "Automatically reload the page"
+msgstr ""
+
+#: wp-crash-guard.php:1332
+msgid "Show maintenance page"
+msgstr ""
+
+#: wp-crash-guard.php:1335
+msgid "Show custom message"
+msgstr ""
+
+#: wp-crash-guard.php:1338
+msgid "Stealth mode (silent redirect)"
+msgstr ""
+
+#: wp-crash-guard.php:1342
+msgid "What to show visitors after deactivating the problematic plugin"
+msgstr ""
+
+#: wp-crash-guard.php:1349
+msgid "Behavior for Admins"
+msgstr ""
+
+#: wp-crash-guard.php:1354
+msgid "Show full error details (blocking page)"
+msgstr ""
+
+#: wp-crash-guard.php:1357
+msgid "Show toast notification (non-blocking)"
+msgstr ""
+
+#: wp-crash-guard.php:1360 wp-crash-guard.php:1490
+msgid "Automatically reload"
+msgstr ""
+
+#: wp-crash-guard.php:1363
+msgid "Show nothing (dashboard notification only)"
+msgstr ""
+
+#: wp-crash-guard.php:1367
+msgid "What to show to administrators after deactivating the problematic plugin"
+msgstr ""
+
+#: wp-crash-guard.php:1368
+msgid "Toast:"
+msgstr ""
+
+#: wp-crash-guard.php:1368
+msgid "A temporary, non-blocking notification that appears in the top right."
+msgstr ""
+
+#: wp-crash-guard.php:1375
+msgid "Reload Delay (seconds)"
+msgstr ""
+
+#: wp-crash-guard.php:1382
+msgid "Seconds to wait before automatically reloading (0 = immediate)"
+msgstr ""
+
+#: wp-crash-guard.php:1389
+msgid "Custom Message"
+msgstr ""
+
+#: wp-crash-guard.php:1395
+msgid "Message to display when the \"custom message\" option is selected."
+msgstr ""
+
+#: wp-crash-guard.php:1396
+msgid "You can use HTML. Leave empty to use the default message."
+msgstr ""
+
+#: wp-crash-guard.php:1403
+msgid "Error Interception Threshold"
+msgstr ""
+
+#: wp-crash-guard.php:1408
+msgid "Fatal Errors (E_ERROR)"
+msgstr ""
+
+#: wp-crash-guard.php:1411
+msgid "Warnings & Above (E_WARNING)"
+msgstr ""
+
+#: wp-crash-guard.php:1414
+msgid "Notices & Above (E_NOTICE)"
+msgstr ""
+
+#: wp-crash-guard.php:1418
+msgid "Choose the minimum error level that should trigger a plugin deactivation."
+msgstr ""
+
+#: wp-crash-guard.php:1419
+msgid "Fatal Errors (default):"
+msgstr ""
+
+#: wp-crash-guard.php:1419
+msgid "Only intervenes for critical errors that would crash the site."
+msgstr ""
+
+#: wp-crash-guard.php:1420
+msgid "Warnings & Above:"
+msgstr ""
+
+#: wp-crash-guard.php:1420
+msgid "Also intervenes for less critical warnings that could indicate a future problem."
+msgstr ""
+
+#: wp-crash-guard.php:1421
+msgid "Notices & Above:"
+msgstr ""
+
+#: wp-crash-guard.php:1421
+msgid "Intervenes for all PHP issues. May lead to unintended deactivations."
+msgstr ""
+
+#: wp-crash-guard.php:1426
+msgid "Advanced Options"
+msgstr ""
+
+#: wp-crash-guard.php:1432
+msgid "Automatically deactivate problematic plugins"
+msgstr ""
+
+#: wp-crash-guard.php:1435
+msgid "If disabled, it will only log the error without deactivating the plugin."
+msgstr ""
+
+#: wp-crash-guard.php:1436 wp-crash-guard.php:1463
+msgid "Warning:"
+msgstr ""
+
+#: wp-crash-guard.php:1436
+msgid "Disabling this option might leave the site non-functional!"
+msgstr ""
+
+#: wp-crash-guard.php:1444
+msgid "Enable Dry Run Mode"
+msgstr ""
+
+#: wp-crash-guard.php:1447
+msgid "In this mode, the plugin will detect and log errors but will NOT deactivate plugins."
+msgstr ""
+
+#: wp-crash-guard.php:1448
+msgid "Useful for testing and diagnostics without impacting the live site."
+msgstr ""
+
+#: wp-crash-guard.php:1456
+msgid "Enable error logging"
+msgstr ""
+
+#: wp-crash-guard.php:1459
+msgid "Logs all intercepted errors to the database."
+msgstr ""
+
+#: wp-crash-guard.php:1468
+msgid "Save Settings"
+msgstr ""
+
+#: wp-crash-guard.php:1473
+msgid "Settings Suggestions:"
+msgstr ""
+
+#: wp-crash-guard.php:1475
+msgid "For development/testing:"
+msgstr ""
+
+#: wp-crash-guard.php:1475
+msgid "Admin = \"Toast notification\", Visitors = \"Do nothing\""
+msgstr ""
+
+#: wp-crash-guard.php:1476
+msgid "For staging:"
+msgstr ""
+
+#: wp-crash-guard.php:1476
+msgid "Admin = \"Toast notification\", Visitors = \"Maintenance\""
+msgstr ""
+
+#: wp-crash-guard.php:1477
+msgid "For production:"
+msgstr ""
+
+#: wp-crash-guard.php:1477
+msgid "Admin = \"Do nothing\", Visitors = \"Do nothing\" (maximum transparency)"
+msgstr ""
+
+#: wp-crash-guard.php:1479
+msgid "Mode Guide:"
+msgstr ""
+
+#: wp-crash-guard.php:1481
+msgid "Do nothing:"
+msgstr ""
+
+#: wp-crash-guard.php:1481
+msgid "The problematic plugin is silently deactivated without showing any messages."
+msgstr ""
+
+#: wp-crash-guard.php:1482
+msgid "Toast notification (Admin):"
+msgstr ""
+
+#: wp-crash-guard.php:1482
+msgid "Shows a temporary, non-blocking notification in the top right that disappears after 5 seconds."
+msgstr ""
+
+#: wp-crash-guard.php:1483
+msgid "Deactivates the plugin and reloads the page after the set delay."
+msgstr ""
+
+#: wp-crash-guard.php:1484
+msgid "Maintenance page:"
+msgstr ""
+
+#: wp-crash-guard.php:1484
+msgid "Shows a professional maintenance page while the plugin is being deactivated."
+msgstr ""
+
+#: wp-crash-guard.php:1485
+msgid "Custom message:"
+msgstr ""
+
+#: wp-crash-guard.php:1485
+msgid "Shows your personalized message after deactivation."
+msgstr ""
+
+#: wp-crash-guard.php:1486
+msgid "Stealth mode:"
+msgstr ""
+
+#: wp-crash-guard.php:1486
+msgid "Immediate redirect after deactivation (similar to reloading with 0 seconds)."
+msgstr ""
+
+#: wp-crash-guard.php:1488
+msgid "Note:"
+msgstr ""
+
+#: wp-crash-guard.php:1488
+msgid "In all modes, the problematic plugin is always deactivated (if the option is enabled). The only difference is what is shown to the user."
+msgstr ""
+
+#: wp-crash-guard.php:1489
+msgid "Memory Errors:"
+msgstr ""
+
+#: wp-crash-guard.php:1489
+msgid "Out of memory errors are handled with an automatic redirect for all modes to ensure site recovery."
+msgstr ""
+
+#: wp-crash-guard.php:1490
+msgid "Important:"
+msgstr ""
+
+#: wp-crash-guard.php:1490
+msgid "If you are testing and see messages you do not want, make sure you have configured the appropriate modes above."
+msgstr ""
